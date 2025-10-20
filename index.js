@@ -1,8 +1,9 @@
 const sdk = require('node-appwrite');
 
+
 /**
  * ========================================
- * TROVATASK PUSH NOTIFICATION v13.0 - PRODUCTION FINAL
+ * TROVATASK PUSH NOTIFICATION v13.1 - PRODUCTION FINAL
  * ========================================
  * 
  * Architecture:
@@ -19,12 +20,14 @@ const sdk = require('node-appwrite');
  * ✅ Comprehensive logging
  * ✅ Target verification before sending
  * ✅ Fallback to newest user if mapping fails
+ * ✅ FCM-compliant data payload (all strings)
  * 
  * Author: TrovaTask Engineering Team
  * Last Updated: October 20, 2025
- * Version: 13.0.0
+ * Version: 13.1.0
  * ========================================
  */
+
 
 // Configuration constants
 const CONFIG = {
@@ -35,6 +38,7 @@ const CONFIG = {
   RETRY_ENABLED: false            // Set to true if you want retry logic
 };
 
+
 module.exports = async ({ req, res, log, error }) => {
   const startTime = Date.now();
   
@@ -43,9 +47,9 @@ module.exports = async ({ req, res, log, error }) => {
   // ========================================
   
   log('========================================');
-  log('🚀 TrovaTask Push Notification v13.0 - PRODUCTION');
+  log('🚀 TrovaTask Push Notification v13.1 - PRODUCTION');
   log(`⏰ Timestamp: ${new Date().toISOString()}`);
-  log(`📍 Environment: ${process.env.APPWRITE_FUNCTION_RUNTIME_NAME || 'Unknown'}`);
+  log(`📍 Environment: ${process.env.APPWRITE_FUNCTION_RUNTIME_NAME || 'Node.js'}`);
   log('========================================');
   
   try {
@@ -349,27 +353,28 @@ module.exports = async ({ req, res, log, error }) => {
     
     // ========================================
     // STEP 5: PREPARE NOTIFICATION DATA
+    // ✅ FIXED: ALL FIELDS MUST BE STRINGS FOR FCM
     // ========================================
     
     log('\n📦 Step 5: Preparing notification data...');
     
     const notificationData = {
       type: 'chat_message',
-      chatId: chatId,
-      messageId: messageId || '',
-      senderId: senderFirebaseUid || '',
-      senderName: senderName,
-      recipientId: recipientFirebaseUid,
-      messageType: type,
-      timestamp: new Date().toISOString(),
+      chatId: String(chatId || ''),
+      messageId: String(messageId || ''),
+      senderId: String(senderFirebaseUid || ''),
+      senderName: String(senderName),
+      recipientId: String(recipientFirebaseUid || ''),
+      messageType: String(type),
+      timestamp: new Date().toISOString(),  // Already a string
       deepLink: `trovatask://chat/${chatId}`,
-      badge: 1,
+      badge: '1',  // ✅ FIXED: String instead of number
       // Additional metadata
-      lookupMethod: lookupMethod,
-      notificationVersion: '13.0.0'
+      lookupMethod: String(lookupMethod || 'unknown'),
+      notificationVersion: '13.1.0'
     };
     
-    log(`   ✓ Notification data prepared`);
+    log(`   ✓ Notification data prepared (all fields as strings)`);
     log(`   Deep link: ${notificationData.deepLink}`);
     
     // ========================================
@@ -387,7 +392,7 @@ module.exports = async ({ req, res, log, error }) => {
       undefined,                    // topics
       [recipientAppwriteUserId],   // users
       undefined,                    // targets
-      notificationData,             // data
+      notificationData,             // data (all strings now!)
       undefined,                    // action
       undefined,                    // icon
       undefined,                    // sound
@@ -429,7 +434,7 @@ module.exports = async ({ req, res, log, error }) => {
       messageType: type,
       lookupMethod: lookupMethod,
       timestamp: new Date().toISOString(),
-      version: '13.0.0'
+      version: '13.1.0'
     });
     
   } catch (err) {
@@ -470,7 +475,7 @@ module.exports = async ({ req, res, log, error }) => {
       errorCode: err.code || 'UNKNOWN',
       duration: `${duration}ms`,
       timestamp: new Date().toISOString(),
-      version: '13.0.0'
+      version: '13.1.0'
     }, statusCode);
   }
 };

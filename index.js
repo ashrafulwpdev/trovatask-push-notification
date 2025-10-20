@@ -4,75 +4,109 @@ module.exports = async ({ req, res, log, error }) => {
   const startTime = Date.now();
   
   log('========================================');
-  log(`🚀 TrovaTaskSendPushNotification invoked at ${new Date().toISOString()}`);
+  log(`🚀 TrovaTask Push v6.0`);
+  log(`⏰ ${new Date().toISOString()}`);
   log('========================================');
   
   try {
-    const { chatId, senderId, recipientId, text, type } = req.payload || {};
+    // Parse event
+    const eventData = JSON.parse(req.bodyRaw || '{}');
+    const recipientId = eventData.recipientId || eventData.data?.recipientId;
+    const senderId = eventData.senderId || eventData.data?.senderId;
+    const text = eventData.text || eventData.data?.text || 'New message';
+    const chatId = eventData.chatId || eventData.data?.chatId;
+    const type = eventData.type || eventData.data?.type || 'text';
     
-    // Validate payload
-    if (!chatId || !senderId || !recipientId || !text || !type) {
-      const msg = 'Missing required fields: chatId, senderId, recipientId, text, type';
-      error(`❌ Validation failed: ${msg}`);
-      error(`Received: ${JSON.stringify(req.payload)}`);
-      return res.json({ success: false, error: msg }, 400);
+    if (!recipientId) {
+      error('❌ Missing recipientId');
+      return res.json({ success: false, error: 'Missing recipientId' }, 400);
     }
     
-    log(`📢 Processing notification:`);
-    log(`   → Recipient: ${recipientId}`);
-    log(`   → Sender: ${senderId}`);
-    log(`   → Chat ID: ${chatId}`);
-    log(`   → Type: ${type}`);
-    log(`   → Snippet: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+    log(`📢 Recipient: ${recipientId}`);
+    log(`📢 Sender: ${senderId || 'Unknown'}`);
+    log(`📢 Text: "${text.substring(0, 50)}..."`);
     
     // Initialize Appwrite
     const client = new sdk.Client()
-      .setEndpoint(process.env.APPWRITE_FUNCTION_API_ENDPOINT)
+      .setEndpoint(process.env.APPWRITE_FUNCTION_API_ENDPOINT || 'https://cloud.appwrite.io/v1')
       .setProject(process.env.APPWRITE_FUNCTION_PROJECT_ID)
       .setKey(process.env.APPWRITE_API_KEY);
     
     const messaging = new sdk.Messaging(client);
+    const databases = new sdk.Databases(client);
+    
+    // Get sender name
+    let senderName = 'Someone';
+    if (senderId) {
+      try {
+        const senderDoc = await databases.getDocument('ChatDatabase', 'users', senderId);
+        senderName = senderDoc.fullName || senderDoc.username || 'Someone';
+        log(`✅ Sender: ${senderName}`);
+      } catch (err) {
+        log(`⚠️ Could not fetch sender: ${err.message}`);
+      }
+    }
     
     // Format notification
-    const title = `New message from user ${senderId}`;
+    const title = `${senderName} sent you a message`;
     const body = type !== 'text' 
-      ? `[${type.toUpperCase()} message]`
-      : text.length > 100 ? `${text.slice(0, 100)}...` : text;
+      ? `[${type.toUpperCase()}]`
+      : text.length > 100 ? `${text.substring(0, 100)}...` : text;
     
-    // Send notification using createPush
-    log(`📤 Sending push notification...`);
+    log(`📤 Sending: "${title}" - "${body}"`);
+    
+    // Send push notification
     const message = await messaging.createPush(
-      sdk.ID.unique(),           // messageId
-      title,                     // title
-      body,                      // body
-      [],                        // topics (empty for direct user messaging)
-      [recipientId],             // users (array with recipient ID)
-      [],                        // targets (empty - Appwrite auto-finds user's devices)
-      {                          // data (custom payload for deep linking)
-        deepLink: `trovatask://chat/${chatId}`,
-        chatId,
-        senderId,
-        type
-      }
+      sdk.ID.unique(),
+      title,
+      body,
+      [],
+      [recipientId],
+      [],
+      {
+        type: 'chat_message',
+        chatId: chatId || '',
+        senderId: senderId || '',
+        recipientId: recipientId,
+        timestamp: new Date().toISOString(),
+        deepLink: `trovatask://chat/${chatId || ''}`
+      },
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      false
     );
     
     const duration = Date.now() - startTime;
-    log(`✅ Notification sent successfully in ${duration}ms`);
-    log(`   Message ID: ${message.$id}`);
+    log(`✅ Sent in ${duration}ms`);
+    log(`   ID: ${message.$id}`);
+    log(`   Status: ${message.status}`);
     log('========================================');
     
-    return res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
       duration: `${duration}ms`,
-      messageId: message.$id
+      messageId: message.$id,
+      recipient: recipientId,
+      sender: senderName,
+      status: message.status
     });
     
   } catch (err) {
     const duration = Date.now() - startTime;
-    error(`❌ Notification failed after ${duration}ms: ${err.message}`);
-    error(`Stack: ${err.stack}`);
+    error(`❌ Failed after ${duration}ms`);
+    error(`   ${err.message}`);
+    error(`   ${err.stack}`);
     log('========================================');
     
-    return res.json({ success: false, error: err.message }, 500);
+    return res.json({
+      success: false,
+      error: err.message,
+      duration: `${duration}ms`
+    }, 500);
   }
 };

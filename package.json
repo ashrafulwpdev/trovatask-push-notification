@@ -1,6 +1,6 @@
 {
   "name": "trovatask-push-notification",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "TrovaTask Push Notification using Official Appwrite Messaging API",
   "main": "index.js",
   "scripts": {
@@ -16,7 +16,7 @@
   "author": "TrovaTask Engineering Team",
   "license": "MIT",
   "dependencies": {
-    "node-appwrite": "^11.0.0"
+    "node-appwrite": "^14.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

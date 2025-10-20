@@ -1,10 +1,13 @@
 const sdk = require('node-appwrite');
 
+/**
+ * TrovaTask Push Notification v6.1 - FIXED action parameter
+ */
 module.exports = async ({ req, res, log, error }) => {
   const startTime = Date.now();
   
   log('========================================');
-  log(`🚀 TrovaTask Push v6.0`);
+  log(`🚀 TrovaTask Push v6.1`);
   log(`⏰ ${new Date().toISOString()}`);
   log('========================================');
   
@@ -55,15 +58,15 @@ module.exports = async ({ req, res, log, error }) => {
     
     log(`📤 Sending: "${title}" - "${body}"`);
     
-    // Send push notification
+    // ✅ FIXED: Use undefined instead of empty strings for optional params
     const message = await messaging.createPush(
-      sdk.ID.unique(),
-      title,
-      body,
-      [],
-      [recipientId],
-      [],
-      {
+      sdk.ID.unique(),           // messageId
+      title,                     // title
+      body,                      // body
+      undefined,                 // topics
+      [recipientId],             // users
+      undefined,                 // targets
+      {                          // data
         type: 'chat_message',
         chatId: chatId || '',
         senderId: senderId || '',
@@ -71,14 +74,14 @@ module.exports = async ({ req, res, log, error }) => {
         timestamp: new Date().toISOString(),
         deepLink: `trovatask://chat/${chatId || ''}`
       },
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      false
+      undefined,                 // action (use undefined, not '')
+      undefined,                 // image
+      undefined,                 // icon
+      undefined,                 // sound
+      undefined,                 // color
+      undefined,                 // tag
+      undefined,                 // badge
+      false                      // draft
     );
     
     const duration = Date.now() - startTime;

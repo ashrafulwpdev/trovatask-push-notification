@@ -1,20 +1,19 @@
 {
   "name": "trovatask-push-notification",
-  "version": "4.0.0",
-  "description": "TrovaTask Push Notification Function using Appwrite Messaging API with FCM provider",
+  "version": "5.0.0",
+  "description": "TrovaTask Push Notification using Official Appwrite Messaging API",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "test": "echo \"No tests specified\" && exit 0"
+    "start": "node index.js"
   },
   "keywords": [
     "appwrite",
-    "push-notifications",
-    "fcm",
     "messaging",
+    "push-notification",
+    "fcm",
     "trovatask"
   ],
-  "author": "TrovaTask Team",
+  "author": "TrovaTask Engineering Team",
   "license": "MIT",
   "dependencies": {
     "node-appwrite": "^11.0.0"

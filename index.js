@@ -1,38 +1,25 @@
 const sdk = require('node-appwrite');
+const admin = require('firebase-admin');
 
 /**
  * ========================================
- * TROVATASK PUSH NOTIFICATION v14.0 - MULTI-DEVICE PRODUCTION
+ * TROVATASK PUSH NOTIFICATION v14.1 - FIREBASE FIRESTORE
  * ========================================
  * 
+ * FIXED IN v14.1:
+ * ✅ Reads devices map from FIREBASE FIRESTORE (not Appwrite Database)
+ * ✅ Added userId parameter to messaging.createPush()
+ * ✅ Works with AppwriteManager v11.1 (Firebase Firestore only)
+ * 
  * Architecture:
- * - Firebase Auth = Main authentication (email/password/Google)
- * - Appwrite = Push notifications + Message storage
- * - Anonymous users per device (one per device for security)
- * - Firebase UID → Appwrite User IDs mapping (MULTIPLE devices)
- * - Device-specific mapping in Firebase Firestore
- * 
- * Features:
- * ✅ Multi-device support (sends to ALL user devices)
- * ✅ Device-specific mapping lookup
- * ✅ Human-readable device names in logs
- * ✅ All message types supported (text, image, video, audio, file, location)
- * ✅ Production-grade error handling
- * ✅ Comprehensive logging per device
- * ✅ Target verification before sending
- * ✅ Fallback strategies for each device
- * ✅ FCM-compliant data payload (all strings)
- * 
- * NEW in v14.0:
- * ✅ Reads devices map from Firebase Firestore
- * ✅ Sends notification to ALL registered devices
- * ✅ Per-device error handling (one device failure doesn't stop others)
- * ✅ Device name and ID tracking in logs
+ * - Firebase Firestore: Device mapping (devices.{deviceId}.appwriteUserId)
+ * - Appwrite Messaging: Push notification delivery
+ * - Multi-device support: Each device gets its own notification
  * 
  * Author: TrovaTask Engineering Team
  * Last Updated: October 22, 2025
- * Version: 14.0.0
- * Aligned with: AppwriteManager v11.0
+ * Version: 14.1.0
+ * Aligned with: AppwriteManager v11.1
  * ========================================
  */
 
@@ -40,25 +27,20 @@ const sdk = require('node-appwrite');
 const CONFIG = {
   MAX_TEXT_LENGTH: 100,
   TRUNCATE_SUFFIX: '...',
-  MIN_DEVICES_FOR_WARNING: 5,  // Log warning if user has this many devices
-  TIMEOUT_PER_DEVICE: 5000     // 5 seconds timeout per device
+  MIN_DEVICES_FOR_WARNING: 5,
+  TIMEOUT_PER_DEVICE: 5000
 };
 
 module.exports = async ({ req, res, log, error }) => {
   const startTime = Date.now();
   
-  // ========================================
-  // INITIALIZATION
-  // ========================================
-  
   log('========================================');
-  log('🚀 TrovaTask Push Notification v14.0 - MULTI-DEVICE');
+  log('🚀 TrovaTask Push Notification v14.1 - FIREBASE FIRESTORE');
   log(`⏰ Timestamp: ${new Date().toISOString()}`);
-  log(`📍 Environment: ${process.env.APPWRITE_FUNCTION_RUNTIME_NAME || 'Node.js'}`);
   log('========================================');
   
   try {
-    // Parse event data from Appwrite database trigger
+    // Parse event data
     const eventData = JSON.parse(req.bodyRaw || '{}');
     
     const recipientFirebaseUid = eventData.recipientId;
@@ -76,33 +58,18 @@ module.exports = async ({ req, res, log, error }) => {
     log(`   Type: ${type}`);
     log(`   Text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
     
-    // ========================================
-    // VALIDATION
-    // ========================================
-    
-    if (!recipientFirebaseUid) {
-      error('❌ Validation failed: Missing recipientId');
+    // Validation
+    if (!recipientFirebaseUid || !chatId) {
+      error('❌ Validation failed: Missing recipientId or chatId');
       return res.json({ 
         success: false, 
-        error: 'Missing recipientId',
+        error: 'Missing required fields',
         timestamp: new Date().toISOString()
       }, 400);
     }
     
-    if (!chatId) {
-      error('❌ Validation failed: Missing chatId');
-      return res.json({ 
-        success: false, 
-        error: 'Missing chatId',
-        timestamp: new Date().toISOString()
-      }, 400);
-    }
-    
-    // ========================================
-    // APPWRITE CLIENT INITIALIZATION
-    // ========================================
-    
-    log('\n🔧 Initializing Appwrite clients...');
+    // Initialize Appwrite
+    log('\n🔧 Initializing Appwrite...');
     
     const client = new sdk.Client()
       .setEndpoint(process.env.APPWRITE_FUNCTION_API_ENDPOINT || 'https://cloud.appwrite.io/v1')
@@ -110,110 +77,105 @@ module.exports = async ({ req, res, log, error }) => {
       .setKey(process.env.APPWRITE_API_KEY);
     
     const messaging = new sdk.Messaging(client);
-    const databases = new sdk.Databases(client);
     const users = new sdk.Users(client);
     
-    log('   ✓ Messaging API initialized');
-    log('   ✓ Databases API initialized');
-    log('   ✓ Users API initialized');
+    log('   ✓ Appwrite Messaging initialized');
+    log('   ✓ Appwrite Users initialized');
+    
+    // Initialize Firebase Admin
+    log('\n🔥 Initializing Firebase Admin...');
+    
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT))
+      });
+    }
+    
+    const db = admin.firestore();
+    log('   ✓ Firebase Firestore initialized');
     
     // ========================================
-    // STEP 1: FETCH RECIPIENT'S DEVICES MAP
+    // STEP 1: FETCH RECIPIENT'S DEVICES FROM FIREBASE FIRESTORE
     // ========================================
     
     log('\n🔍 Step 1: Fetching recipient devices from Firebase Firestore...');
     
-    let recipientData;
-    let devicesMap = {};
+    const userDocRef = db.collection('users').doc(recipientFirebaseUid);
+    const userDoc = await userDocRef.get();
     
-    try {
-      recipientData = await databases.getDocument(
-        'UserDatabase', 
-        'users', 
-        recipientFirebaseUid
-      );
+    if (!userDoc.exists) {
+      error('❌ Recipient not found in Firebase Firestore');
+      return res.json({ 
+        success: false, 
+        error: 'Recipient user not found',
+        firebaseUid: recipientFirebaseUid,
+        timestamp: new Date().toISOString()
+      }, 404);
+    }
+    
+    const userData = userDoc.data();
+    let devicesMap = userData.devices || {};
+    
+    const deviceCount = Object.keys(devicesMap).length;
+    
+    if (deviceCount === 0) {
+      log('   ⚠️ WARNING: User has NO registered devices');
       
-      // Extract devices map
-      devicesMap = recipientData.devices || {};
-      
-      const deviceCount = Object.keys(devicesMap).length;
-      
-      if (deviceCount === 0) {
-        log('   ⚠️ WARNING: User has NO registered devices');
-        log('   This user may be using old sync method or never logged in');
-        
-        // Fallback to old method (lastAppwriteUserId)
-        if (recipientData.lastAppwriteUserId) {
-          log('   🔄 Fallback: Using lastAppwriteUserId from mapping');
-          devicesMap = {
-            'fallback_device': {
-              appwriteUserId: recipientData.lastAppwriteUserId,
-              deviceName: 'Unknown Device (Legacy)',
-              deviceId: 'fallback'
-            }
-          };
-        } else {
-          throw new Error('No devices found and no fallback appwriteUserId');
-        }
+      // Fallback to old method
+      if (userData.lastAppwriteUserId) {
+        log('   🔄 Fallback: Using lastAppwriteUserId');
+        devicesMap = {
+          'fallback_device': {
+            appwriteUserId: userData.lastAppwriteUserId,
+            deviceName: 'Unknown Device (Legacy)',
+            deviceId: 'fallback'
+          }
+        };
       } else {
-        log(`   ✅ Found ${deviceCount} registered device(s)`);
-        
-        if (deviceCount >= CONFIG.MIN_DEVICES_FOR_WARNING) {
-          log(`   ⚠️ WARNING: User has ${deviceCount} devices (above normal threshold)`);
-        }
-        
-        // Log device details
-        Object.entries(devicesMap).forEach(([deviceId, deviceData], index) => {
-          log(`   Device ${index + 1}: ${deviceData.deviceName || 'Unknown'} (ID: ${deviceId.substring(0, 8)}...)`);
-        });
+        throw new Error('No devices found and no fallback appwriteUserId');
+      }
+    } else {
+      log(`   ✅ Found ${deviceCount} registered device(s) in Firebase Firestore`);
+      
+      if (deviceCount >= CONFIG.MIN_DEVICES_FOR_WARNING) {
+        log(`   ⚠️ WARNING: User has ${deviceCount} devices`);
       }
       
-    } catch (mappingErr) {
-      if (mappingErr.code === 404) {
-        error('❌ Recipient not found in UserDatabase');
-        return res.json({ 
-          success: false, 
-          error: 'Recipient user not found in database',
-          firebaseUid: recipientFirebaseUid,
-          timestamp: new Date().toISOString()
-        }, 404);
-      } else {
-        throw mappingErr;
-      }
+      Object.entries(devicesMap).forEach(([deviceId, deviceData], index) => {
+        log(`   Device ${index + 1}: ${deviceData.deviceName || 'Unknown'} (ID: ${deviceId.substring(0, 8)}...)`);
+      });
     }
     
     // ========================================
     // STEP 2: FETCH SENDER INFORMATION
     // ========================================
     
-    log('\n👤 Step 2: Fetching sender information...');
+    log('\n👤 Step 2: Fetching sender information from Firebase Firestore...');
     
     let senderName = 'Someone';
     let senderEmail = null;
     
     if (senderFirebaseUid) {
       try {
-        const senderDoc = await databases.getDocument(
-          'UserDatabase', 
-          'users', 
-          senderFirebaseUid
-        );
+        const senderDocRef = db.collection('users').doc(senderFirebaseUid);
+        const senderDoc = await senderDocRef.get();
         
-        senderName = senderDoc.fullName?.trim() || 
-                     senderDoc.username?.trim() || 
-                     (senderDoc.email ? senderDoc.email.split('@')[0] : null) ||
-                     'Someone';
-        
-        senderEmail = senderDoc.email;
-        
-        log(`   ✅ Sender found: ${senderName}`);
-        if (senderEmail) log(`      Email: ${senderEmail}`);
+        if (senderDoc.exists) {
+          const senderData = senderDoc.data();
+          
+          senderName = senderData.fullName?.trim() || 
+                       senderData.username?.trim() || 
+                       (senderData.email ? senderData.email.split('@')[0] : null) ||
+                       'Someone';
+          
+          senderEmail = senderData.email;
+          
+          log(`   ✅ Sender found: ${senderName}`);
+          if (senderEmail) log(`      Email: ${senderEmail}`);
+        }
       } catch (err) {
-        log(`   ⚠️ Could not fetch sender details: ${err.message}`);
-        log(`      Using default sender name`);
+        log(`   ⚠️ Could not fetch sender: ${err.message}`);
       }
-    } else {
-      log(`   ⚠️ No sender Firebase UID provided`);
     }
     
     // ========================================
@@ -282,13 +244,13 @@ module.exports = async ({ req, res, log, error }) => {
       log(`   Appwrite User ID: ${appwriteUserId}`);
       
       try {
-        // Verify user has push targets
+        // Verify push targets
         log(`   🔍 Verifying push targets...`);
         
         const userTargets = await users.listTargets(appwriteUserId);
         
         if (userTargets.total === 0) {
-          log(`   ⚠️ No push targets found for this device`);
+          log(`   ⚠️ No push targets found`);
           log(`   Skipping device...`);
           
           results.failed++;
@@ -306,7 +268,7 @@ module.exports = async ({ req, res, log, error }) => {
         
         log(`   ✓ Found ${userTargets.total} push target(s)`);
         
-        // Prepare device-specific notification data
+        // Prepare notification data
         const notificationData = {
           type: 'chat_message',
           chatId: String(chatId || ''),
@@ -318,11 +280,10 @@ module.exports = async ({ req, res, log, error }) => {
           timestamp: new Date().toISOString(),
           deepLink: `trovatask://chat/${chatId}`,
           badge: '1',
-          // Device-specific metadata
           deviceId: String(deviceId),
           deviceName: String(deviceName),
           appwriteUserId: String(appwriteUserId),
-          notificationVersion: '14.0.0'
+          notificationVersion: '14.1.0'
         };
         
         // Send push notification
@@ -333,7 +294,7 @@ module.exports = async ({ req, res, log, error }) => {
           title,
           body,
           undefined,                  // topics
-          [appwriteUserId],          // users (this specific device's Appwrite user)
+          [appwriteUserId],          // users ← FIXED: Now populated!
           undefined,                  // targets
           notificationData,           // data
           undefined,                  // action
@@ -403,7 +364,6 @@ module.exports = async ({ req, res, log, error }) => {
     log(`📝 Message Type: ${type}`);
     log('========================================\n');
     
-    // Return success if at least one device received notification
     const overallSuccess = results.success > 0;
     
     return res.json({
@@ -420,14 +380,10 @@ module.exports = async ({ req, res, log, error }) => {
       },
       deviceResults: results.deviceResults,
       timestamp: new Date().toISOString(),
-      version: '14.0.0'
+      version: '14.1.0'
     });
     
   } catch (err) {
-    // ========================================
-    // ERROR HANDLING
-    // ========================================
-    
     const duration = Date.now() - startTime;
     
     error('\n========================================');
@@ -460,7 +416,7 @@ module.exports = async ({ req, res, log, error }) => {
       errorCode: err.code || 'UNKNOWN',
       duration: `${duration}ms`,
       timestamp: new Date().toISOString(),
-      version: '14.0.0'
+      version: '14.1.0'
     }, statusCode);
   }
 };

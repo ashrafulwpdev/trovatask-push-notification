@@ -1,29 +1,29 @@
 const sdk = require('node-appwrite');
-const admin = require('firebase-admin');
 
 /**
  * ========================================
- * TROVATASK PUSH NOTIFICATION v14.1 - FIREBASE FIRESTORE
+ * TROVATASK PUSH NOTIFICATION v14.1 FINAL
  * ========================================
  * 
- * FIXED IN v14.1:
- * ✅ Reads devices map from FIREBASE FIRESTORE (not Appwrite Database)
- * ✅ Added userId parameter to messaging.createPush()
- * ✅ Works with AppwriteManager v11.1 (Firebase Firestore only)
+ * FEATURES:
+ * ✅ Reads devices map from Firebase Firestore via REST API
+ * ✅ Multi-device support (sends to ALL user devices)
+ * ✅ Per-device error handling
+ * ✅ Human-readable device names in logs
+ * ✅ Fixed userId parameter bug
+ * ✅ NO Firebase Admin dependency needed!
  * 
  * Architecture:
- * - Firebase Firestore: Device mapping (devices.{deviceId}.appwriteUserId)
+ * - Firebase Firestore: Device mapping (via REST API)
  * - Appwrite Messaging: Push notification delivery
- * - Multi-device support: Each device gets its own notification
+ * - Multi-device: Each device gets its own notification
  * 
  * Author: TrovaTask Engineering Team
- * Last Updated: October 22, 2025
- * Version: 14.1.0
- * Aligned with: AppwriteManager v11.1
+ * Version: 14.1.0 FINAL
+ * Date: October 22, 2025
  * ========================================
  */
 
-// Configuration constants
 const CONFIG = {
   MAX_TEXT_LENGTH: 100,
   TRUNCATE_SUFFIX: '...',
@@ -35,7 +35,7 @@ module.exports = async ({ req, res, log, error }) => {
   const startTime = Date.now();
   
   log('========================================');
-  log('🚀 TrovaTask Push Notification v14.1 - FIREBASE FIRESTORE');
+  log('🚀 TrovaTask Push Notification v14.1 FINAL');
   log(`⏰ Timestamp: ${new Date().toISOString()}`);
   log('========================================');
   
@@ -51,20 +51,18 @@ module.exports = async ({ req, res, log, error }) => {
     const messageId = eventData.messageId || eventData.$id;
     
     log('\n📋 Message Details:');
-    log(`   Recipient (Firebase UID): ${recipientFirebaseUid || 'MISSING ❌'}`);
-    log(`   Sender (Firebase UID): ${senderFirebaseUid || 'MISSING ⚠️'}`);
-    log(`   Chat ID: ${chatId || 'MISSING ❌'}`);
-    log(`   Message ID: ${messageId || 'N/A'}`);
+    log(`   Recipient: ${recipientFirebaseUid || 'MISSING ❌'}`);
+    log(`   Sender: ${senderFirebaseUid || 'MISSING ⚠️'}`);
+    log(`   Chat: ${chatId || 'MISSING ❌'}`);
     log(`   Type: ${type}`);
     log(`   Text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
     
     // Validation
     if (!recipientFirebaseUid || !chatId) {
-      error('❌ Validation failed: Missing recipientId or chatId');
+      error('❌ Missing required fields');
       return res.json({ 
         success: false, 
-        error: 'Missing required fields',
-        timestamp: new Date().toISOString()
+        error: 'Missing recipientId or chatId' 
       }, 400);
     }
     
@@ -79,102 +77,116 @@ module.exports = async ({ req, res, log, error }) => {
     const messaging = new sdk.Messaging(client);
     const users = new sdk.Users(client);
     
-    log('   ✓ Appwrite Messaging initialized');
-    log('   ✓ Appwrite Users initialized');
-    
-    // Initialize Firebase Admin
-    log('\n🔥 Initializing Firebase Admin...');
-    
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT))
-      });
-    }
-    
-    const db = admin.firestore();
-    log('   ✓ Firebase Firestore initialized');
+    log('   ✓ Appwrite initialized');
     
     // ========================================
-    // STEP 1: FETCH RECIPIENT'S DEVICES FROM FIREBASE FIRESTORE
+    // STEP 1: FETCH DEVICES FROM FIRESTORE (REST API)
     // ========================================
     
-    log('\n🔍 Step 1: Fetching recipient devices from Firebase Firestore...');
+    log('\n🔍 Step 1: Fetching devices from Firebase Firestore...');
     
-    const userDocRef = db.collection('users').doc(recipientFirebaseUid);
-    const userDoc = await userDocRef.get();
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/trovataskapp/databases/(default)/documents/users/${recipientFirebaseUid}`;
     
-    if (!userDoc.exists) {
-      error('❌ Recipient not found in Firebase Firestore');
+    let devicesMap = {};
+    let userData = null;
+    
+    try {
+      const response = await fetch(firestoreUrl);
+      
+      if (!response.ok) {
+        throw new Error(`Firestore HTTP ${response.status}`);
+      }
+      
+      const firestoreDoc = await response.json();
+      
+      // Parse Firestore document format
+      if (firestoreDoc.fields) {
+        // Extract devices map
+        if (firestoreDoc.fields.devices && firestoreDoc.fields.devices.mapValue) {
+          const devicesFields = firestoreDoc.fields.devices.mapValue.fields;
+          
+          for (const [deviceId, deviceValue] of Object.entries(devicesFields)) {
+            if (deviceValue.mapValue && deviceValue.mapValue.fields) {
+              const fields = deviceValue.mapValue.fields;
+              
+              devicesMap[deviceId] = {
+                appwriteUserId: fields.appwriteUserId?.stringValue || '',
+                deviceName: fields.deviceName?.stringValue || 'Unknown',
+                deviceId: fields.deviceId?.stringValue || deviceId
+              };
+            }
+          }
+        }
+        
+        // Store for sender lookup
+        userData = {
+          fullName: firestoreDoc.fields.fullName?.stringValue || '',
+          username: firestoreDoc.fields.username?.stringValue || '',
+          email: firestoreDoc.fields.email?.stringValue || '',
+          lastAppwriteUserId: firestoreDoc.fields.lastAppwriteUserId?.stringValue || ''
+        };
+      }
+      
+      const deviceCount = Object.keys(devicesMap).length;
+      
+      if (deviceCount === 0) {
+        log('   ⚠️ No devices found');
+        
+        // Fallback to lastAppwriteUserId
+        if (userData && userData.lastAppwriteUserId) {
+          log('   🔄 Using fallback appwriteUserId');
+          devicesMap = {
+            'fallback': {
+              appwriteUserId: userData.lastAppwriteUserId,
+              deviceName: 'Unknown Device',
+              deviceId: 'fallback'
+            }
+          };
+        } else {
+          throw new Error('No devices and no fallback');
+        }
+      } else {
+        log(`   ✅ Found ${deviceCount} device(s)`);
+        
+        Object.entries(devicesMap).forEach(([deviceId, deviceData], index) => {
+          log(`   Device ${index + 1}: ${deviceData.deviceName} (${deviceId.substring(0, 8)}...)`);
+        });
+      }
+      
+    } catch (firestoreErr) {
+      error(`❌ Firestore fetch failed: ${firestoreErr.message}`);
       return res.json({ 
         success: false, 
-        error: 'Recipient user not found',
-        firebaseUid: recipientFirebaseUid,
-        timestamp: new Date().toISOString()
+        error: 'Failed to fetch user data' 
       }, 404);
     }
     
-    const userData = userDoc.data();
-    let devicesMap = userData.devices || {};
-    
-    const deviceCount = Object.keys(devicesMap).length;
-    
-    if (deviceCount === 0) {
-      log('   ⚠️ WARNING: User has NO registered devices');
-      
-      // Fallback to old method
-      if (userData.lastAppwriteUserId) {
-        log('   🔄 Fallback: Using lastAppwriteUserId');
-        devicesMap = {
-          'fallback_device': {
-            appwriteUserId: userData.lastAppwriteUserId,
-            deviceName: 'Unknown Device (Legacy)',
-            deviceId: 'fallback'
-          }
-        };
-      } else {
-        throw new Error('No devices found and no fallback appwriteUserId');
-      }
-    } else {
-      log(`   ✅ Found ${deviceCount} registered device(s) in Firebase Firestore`);
-      
-      if (deviceCount >= CONFIG.MIN_DEVICES_FOR_WARNING) {
-        log(`   ⚠️ WARNING: User has ${deviceCount} devices`);
-      }
-      
-      Object.entries(devicesMap).forEach(([deviceId, deviceData], index) => {
-        log(`   Device ${index + 1}: ${deviceData.deviceName || 'Unknown'} (ID: ${deviceId.substring(0, 8)}...)`);
-      });
-    }
-    
     // ========================================
-    // STEP 2: FETCH SENDER INFORMATION
+    // STEP 2: FETCH SENDER NAME
     // ========================================
     
-    log('\n👤 Step 2: Fetching sender information from Firebase Firestore...');
+    log('\n👤 Step 2: Fetching sender...');
     
     let senderName = 'Someone';
-    let senderEmail = null;
     
     if (senderFirebaseUid) {
       try {
-        const senderDocRef = db.collection('users').doc(senderFirebaseUid);
-        const senderDoc = await senderDocRef.get();
+        const senderUrl = `https://firestore.googleapis.com/v1/projects/trovataskapp/databases/(default)/documents/users/${senderFirebaseUid}`;
+        const senderResponse = await fetch(senderUrl);
         
-        if (senderDoc.exists) {
-          const senderData = senderDoc.data();
+        if (senderResponse.ok) {
+          const senderDoc = await senderResponse.json();
           
-          senderName = senderData.fullName?.trim() || 
-                       senderData.username?.trim() || 
-                       (senderData.email ? senderData.email.split('@')[0] : null) ||
-                       'Someone';
-          
-          senderEmail = senderData.email;
-          
-          log(`   ✅ Sender found: ${senderName}`);
-          if (senderEmail) log(`      Email: ${senderEmail}`);
+          if (senderDoc.fields) {
+            senderName = senderDoc.fields.fullName?.stringValue || 
+                        senderDoc.fields.username?.stringValue || 
+                        'Someone';
+          }
         }
+        
+        log(`   ✅ Sender: ${senderName}`);
       } catch (err) {
-        log(`   ⚠️ Could not fetch sender: ${err.message}`);
+        log(`   ⚠️ Could not fetch sender`);
       }
     }
     
@@ -197,24 +209,19 @@ module.exports = async ({ req, res, log, error }) => {
         break;
       case 'audio':
         title = `${senderName} sent a voice message`;
-        body = '🎤 Audio message';
+        body = '🎤 Audio';
         break;
       case 'file':
         title = `${senderName} sent a file`;
-        body = '📎 File attachment';
+        body = '📎 File';
         break;
       case 'location':
-        title = `${senderName} shared a location`;
+        title = `${senderName} shared location`;
         body = '📍 Location';
         break;
-      case 'text':
       default:
         title = senderName;
-        if (text.length > CONFIG.MAX_TEXT_LENGTH) {
-          body = text.substring(0, CONFIG.MAX_TEXT_LENGTH - CONFIG.TRUNCATE_SUFFIX.length) + CONFIG.TRUNCATE_SUFFIX;
-        } else {
-          body = text;
-        }
+        body = text.substring(0, CONFIG.MAX_TEXT_LENGTH);
     }
     
     log(`   Title: "${title}"`);
@@ -224,7 +231,7 @@ module.exports = async ({ req, res, log, error }) => {
     // STEP 4: SEND TO ALL DEVICES
     // ========================================
     
-    log('\n📤 Step 4: Sending push notifications to all devices...');
+    log('\n📤 Step 4: Sending notifications...');
     log('========================================');
     
     const results = {
@@ -236,110 +243,91 @@ module.exports = async ({ req, res, log, error }) => {
     
     for (const [deviceId, deviceData] of Object.entries(devicesMap)) {
       const deviceStartTime = Date.now();
-      const deviceName = deviceData.deviceName || 'Unknown Device';
+      const deviceName = deviceData.deviceName || 'Unknown';
       const appwriteUserId = deviceData.appwriteUserId;
       
-      log(`\n📱 Processing Device: ${deviceName}`);
+      log(`\n📱 ${deviceName}`);
       log(`   Device ID: ${deviceId}`);
-      log(`   Appwrite User ID: ${appwriteUserId}`);
+      log(`   Appwrite ID: ${appwriteUserId}`);
       
       try {
-        // Verify push targets
-        log(`   🔍 Verifying push targets...`);
+        // Verify targets
+        log(`   🔍 Checking targets...`);
         
         const userTargets = await users.listTargets(appwriteUserId);
         
         if (userTargets.total === 0) {
-          log(`   ⚠️ No push targets found`);
-          log(`   Skipping device...`);
-          
+          log(`   ⚠️ No targets, skipping`);
           results.failed++;
           results.deviceResults.push({
             deviceId,
             deviceName,
-            appwriteUserId,
             success: false,
             error: 'No push targets',
             duration: Date.now() - deviceStartTime
           });
-          
           continue;
         }
         
-        log(`   ✓ Found ${userTargets.total} push target(s)`);
+        log(`   ✓ Found ${userTargets.total} target(s)`);
         
-        // Prepare notification data
+        // Prepare data
         const notificationData = {
           type: 'chat_message',
-          chatId: String(chatId || ''),
-          messageId: String(messageId || ''),
+          chatId: String(chatId),
+          messageId: String(messageId),
           senderId: String(senderFirebaseUid || ''),
           senderName: String(senderName),
-          recipientId: String(recipientFirebaseUid || ''),
+          recipientId: String(recipientFirebaseUid),
           messageType: String(type),
           timestamp: new Date().toISOString(),
           deepLink: `trovatask://chat/${chatId}`,
           badge: '1',
           deviceId: String(deviceId),
           deviceName: String(deviceName),
-          appwriteUserId: String(appwriteUserId),
-          notificationVersion: '14.1.0'
+          version: '14.1.0'
         };
         
-        // Send push notification
-        log(`   📤 Sending push notification...`);
+        // Send notification
+        log(`   📤 Sending...`);
         
         const message = await messaging.createPush(
           sdk.ID.unique(),
           title,
           body,
-          undefined,                  // topics
-          [appwriteUserId],          // users ← FIXED: Now populated!
-          undefined,                  // targets
-          notificationData,           // data
-          undefined,                  // action
-          undefined,                  // icon
-          undefined,                  // sound
-          undefined,                  // color
-          undefined,                  // tag
-          undefined,                  // badge
-          undefined,                  // draft
-          false                       // scheduledAt
+          undefined,
+          [appwriteUserId],  // ✅ FIXED: users parameter
+          undefined,
+          notificationData
         );
         
-        const deviceDuration = Date.now() - deviceStartTime;
+        const duration = Date.now() - deviceStartTime;
         
-        log(`   ✅ SUCCESS! Push sent to ${deviceName}`);
-        log(`   Message ID: ${message.$id}`);
-        log(`   Duration: ${deviceDuration}ms`);
+        log(`   ✅ SUCCESS! ${message.$id}`);
+        log(`   Duration: ${duration}ms`);
         
         results.success++;
         results.deviceResults.push({
           deviceId,
           deviceName,
-          appwriteUserId,
           success: true,
           messageId: message.$id,
-          targetsCount: userTargets.total,
-          duration: deviceDuration
+          duration
         });
         
       } catch (deviceErr) {
-        const deviceDuration = Date.now() - deviceStartTime;
+        const duration = Date.now() - deviceStartTime;
         
-        error(`   ❌ FAILED to send to ${deviceName}`);
-        error(`   Error: ${deviceErr.message}`);
-        error(`   Duration: ${deviceDuration}ms`);
+        error(`   ❌ FAILED: ${deviceErr.message}`);
+        error(`   Duration: ${duration}ms`);
         
         results.failed++;
         results.deviceResults.push({
           deviceId,
           deviceName,
-          appwriteUserId,
           success: false,
           error: deviceErr.message,
-          errorCode: deviceErr.code,
-          duration: deviceDuration
+          duration
         });
       }
     }
@@ -351,34 +339,21 @@ module.exports = async ({ req, res, log, error }) => {
     const totalDuration = Date.now() - startTime;
     
     log('\n========================================');
-    log(`✅ MULTI-DEVICE NOTIFICATION COMPLETE`);
+    log(`✅ COMPLETE!`);
     log('========================================');
-    log(`⏱️ Total Duration: ${totalDuration}ms`);
+    log(`⏱️ Duration: ${totalDuration}ms`);
     log(`📊 Results:`);
-    log(`   Total Devices: ${results.total}`);
-    log(`   Successful: ${results.success}`);
+    log(`   Total: ${results.total}`);
+    log(`   Success: ${results.success}`);
     log(`   Failed: ${results.failed}`);
-    log(`   Success Rate: ${((results.success / results.total) * 100).toFixed(1)}%`);
-    log(`👤 Sender: ${senderName}`);
-    log(`📱 Recipient Firebase UID: ${recipientFirebaseUid}`);
-    log(`📝 Message Type: ${type}`);
-    log('========================================\n');
-    
-    const overallSuccess = results.success > 0;
+    log(`   Rate: ${((results.success / results.total) * 100).toFixed(1)}%`);
+    log('========================================');
     
     return res.json({
-      success: overallSuccess,
+      success: results.success > 0,
       duration: `${totalDuration}ms`,
-      recipientFirebaseUid: recipientFirebaseUid,
-      senderName: senderName,
-      messageType: type,
-      devices: {
-        total: results.total,
-        success: results.success,
-        failed: results.failed,
-        successRate: `${((results.success / results.total) * 100).toFixed(1)}%`
-      },
-      deviceResults: results.deviceResults,
+      devices: results,
+      sender: senderName,
       timestamp: new Date().toISOString(),
       version: '14.1.0'
     });
@@ -387,36 +362,18 @@ module.exports = async ({ req, res, log, error }) => {
     const duration = Date.now() - startTime;
     
     error('\n========================================');
-    error('❌ PUSH NOTIFICATION FAILED');
+    error('❌ ERROR');
     error('========================================');
-    error(`⏱️ Duration: ${duration}ms`);
-    error(`🔴 Error: ${err.message}`);
-    error(`📋 Error Code: ${err.code || 'N/A'}`);
-    error(`📚 Stack Trace:`);
-    error(err.stack);
-    error('========================================\n');
-    
-    let statusCode = 500;
-    let errorMessage = err.message;
-    
-    if (err.code === 404) {
-      statusCode = 404;
-      errorMessage = 'Resource not found';
-    } else if (err.code === 401 || err.code === 403) {
-      statusCode = 401;
-      errorMessage = 'Authentication failed';
-    } else if (err.code === 400) {
-      statusCode = 400;
-      errorMessage = 'Bad request';
-    }
+    error(`Duration: ${duration}ms`);
+    error(`Message: ${err.message}`);
+    error(`Stack: ${err.stack}`);
+    error('========================================');
     
     return res.json({
       success: false,
-      error: errorMessage,
-      errorCode: err.code || 'UNKNOWN',
+      error: err.message,
       duration: `${duration}ms`,
-      timestamp: new Date().toISOString(),
-      version: '14.1.0'
-    }, statusCode);
+      timestamp: new Date().toISOString()
+    }, 500);
   }
 };

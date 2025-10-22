@@ -1,7 +1,7 @@
 {
   "name": "trovatask-push-notification",
-  "version": "14.0.0",
-  "description": "TrovaTask Push Notification System v14.0 - Multi-Device Production Implementation with Device-Specific Mapping using Official Appwrite Messaging API and Firebase Auth Integration",
+  "version": "14.1.0",
+  "description": "TrovaTask Push Notification System v14.1 - Multi-Device with Firebase Firestore",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -17,8 +17,7 @@
     "real-time",
     "notifications",
     "cloud-function",
-    "multi-device",
-    "device-mapping"
+    "multi-device"
   ],
   "author": "TrovaTask Engineering Team <engineering@trovatask.com>",
   "license": "MIT",
@@ -44,25 +43,10 @@
     }
   },
   "changelog": {
-    "14.0.0": "Multi-device support: sends notifications to ALL user devices, device-specific mapping, per-device error handling, human-readable device names in logs, JSON parsing for devices field, backward compatibility with single-device users",
-    "13.1.0": "Fixed FCM data payload - all fields must be strings",
-    "13.0.0": "Production-ready version with smart user lookup, comprehensive logging, and error handling",
+    "14.1.0": "Multi-device support with Firebase Firestore REST API, fixed userId parameter",
+    "13.0.0": "Production-ready version with smart user lookup",
     "12.0.0": "Added user mapping support and pagination",
     "11.0.0": "Implemented newest user fallback logic",
-    "10.0.0": "Official Appwrite Messaging API integration",
-    "6.0.0": "Initial version with basic push notification support"
-  },
-  "features": {
-    "multiDevice": true,
-    "deviceMapping": true,
-    "fallbackSupport": true,
-    "perDeviceErrorHandling": true,
-    "comprehensiveLogging": true,
-    "backwardCompatible": true
-  },
-  "compatibility": {
-    "appwriteManager": "v11.0+",
-    "androidApp": "TrovaTask",
-    "database": "UserDatabase.users with devices field"
+    "10.0.0": "Official Appwrite Messaging API integration"
   }
 }

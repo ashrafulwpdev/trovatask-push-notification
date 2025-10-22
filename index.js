@@ -3,18 +3,16 @@ const admin = require('firebase-admin');
 
 /**
  * ========================================
- * TROVATASK PUSH NOTIFICATION v14.1 FINAL
+ * TROVATASK PUSH NOTIFICATION v14.1 FINAL FIXED
  * ========================================
  * 
- * FEATURES:
+ * FIXED IN v14.1.1:
+ * ✅ Parses FLAT Firestore structure (devices.xxx) correctly
+ * ✅ Also supports NESTED structure (devices: {}) for backward compatibility
  * ✅ Multi-device support (sends to ALL user devices OR specific device)
- * ✅ Reads devices map from Firebase Firestore via Firebase Admin SDK
- * ✅ Per-device error handling (one device failure doesn't stop others)
- * ✅ Human-readable device names in logs
- * ✅ Fixed userId parameter bug (was causing "Missing required parameter" error)
+ * ✅ Per-device error handling
+ * ✅ Fixed userId parameter bug
  * ✅ Optional deviceId parameter for targeted notifications
- * ✅ Comprehensive logging and error handling
- * ✅ All message types supported (text, image, video, audio, file, location)
  * 
  * Architecture:
  * - Firebase Firestore: Device mapping (devices.{deviceId}.appwriteUserId)
@@ -22,21 +20,9 @@ const admin = require('firebase-admin');
  * - Appwrite Messaging: Push notification delivery via FCM
  * - Multi-device: Each device gets its own notification
  * 
- * JSON Format:
- * {
- *   "recipientId": "firebase_uid",        // Required
- *   "senderId": "firebase_uid",           // Optional
- *   "chatId": "chat_id",                  // Required
- *   "text": "message text",               // Required
- *   "type": "text",                       // Optional (text, image, video, etc)
- *   "messageId": "msg_id",                // Optional
- *   "deviceId": "device_id"               // Optional (for specific device)
- * }
- * 
  * Author: TrovaTask Engineering Team
- * Version: 14.1.0 FINAL
+ * Version: 14.1.1 FINAL FIXED
  * Date: October 22, 2025
- * Aligned with: AppwriteManager v11.1
  * ========================================
  */
 
@@ -56,7 +42,7 @@ module.exports = async ({ req, res, log, error }) => {
   // ========================================
   
   log('========================================');
-  log('🚀 TrovaTask Push Notification v14.1 FINAL');
+  log('🚀 TrovaTask Push Notification v14.1.1 FINAL FIXED');
   log(`⏰ Timestamp: ${new Date().toISOString()}`);
   log(`📍 Environment: ${process.env.APPWRITE_FUNCTION_RUNTIME_NAME || 'Node.js'}`);
   log('========================================');
@@ -71,7 +57,7 @@ module.exports = async ({ req, res, log, error }) => {
     const chatId = eventData.chatId;
     const type = eventData.type || 'text';
     const messageId = eventData.messageId || eventData.$id;
-    const targetDeviceId = eventData.deviceId;  // NEW: Optional device targeting
+    const targetDeviceId = eventData.deviceId;  // OPTIONAL: Target specific device
     
     log('\n📋 Message Details:');
     log(`   Recipient (Firebase UID): ${recipientFirebaseUid || 'MISSING ❌'}`);
@@ -159,7 +145,34 @@ module.exports = async ({ req, res, log, error }) => {
     }
     
     const userData = userDoc.data();
-    let devicesMap = userData.devices || {};
+    
+    // ========================================
+    // ✅ FIXED: Parse devices from BOTH structures
+    // ========================================
+    
+    let devicesMap = {};
+    
+    // Try FLAT structure first (devices.1727a36fbc0f...)
+    log('   🔍 Parsing device structure...');
+    Object.keys(userData).forEach(key => {
+      if (key.startsWith('devices.')) {
+        const deviceId = key.replace('devices.', '');
+        devicesMap[deviceId] = userData[key];
+        log(`   📊 Found device in FLAT structure: ${deviceId.substring(0, 12)}...`);
+      }
+    });
+    
+    // If no devices found using flat structure, try nested structure
+    if (Object.keys(devicesMap).length === 0 && userData.devices && typeof userData.devices === 'object') {
+      log('   📊 Trying NESTED structure (devices: {})...');
+      devicesMap = userData.devices;
+      Object.keys(devicesMap).forEach(deviceId => {
+        log(`   📊 Found device in NESTED structure: ${deviceId.substring(0, 12)}...`);
+      });
+    }
+    
+    log(`   📊 Total devices parsed: ${Object.keys(devicesMap).length}`);
+    log(`   Structure type: ${Object.keys(userData).some(k => k.startsWith('devices.')) ? 'FLAT (devices.xxx)' : 'NESTED (devices: {})'}`);
     
     // NEW: Filter by target device if specified
     if (targetDeviceId) {
@@ -187,6 +200,7 @@ module.exports = async ({ req, res, log, error }) => {
       // Fallback to old method
       if (userData.lastAppwriteUserId) {
         log('   🔄 Fallback: Using lastAppwriteUserId');
+        log(`   Legacy Appwrite User ID: ${userData.lastAppwriteUserId}`);
         devicesMap = {
           'fallback_device': {
             appwriteUserId: userData.lastAppwriteUserId,
@@ -212,6 +226,7 @@ module.exports = async ({ req, res, log, error }) => {
       
       Object.entries(devicesMap).forEach(([deviceId, deviceData], index) => {
         log(`   Device ${index + 1}: ${deviceData.deviceName || 'Unknown'} (ID: ${deviceId.substring(0, 12)}...)`);
+        log(`      Appwrite User ID: ${deviceData.appwriteUserId || 'N/A'}`);
       });
     }
     
@@ -357,7 +372,7 @@ module.exports = async ({ req, res, log, error }) => {
           deviceId: String(deviceId),
           deviceName: String(deviceName),
           appwriteUserId: String(appwriteUserId),
-          notificationVersion: '14.1.0'
+          notificationVersion: '14.1.1'
         };
         
         // Send push notification
@@ -458,7 +473,7 @@ module.exports = async ({ req, res, log, error }) => {
       },
       deviceResults: results.deviceResults,
       timestamp: new Date().toISOString(),
-      version: '14.1.0'
+      version: '14.1.1'
     });
     
   } catch (err) {
@@ -494,7 +509,7 @@ module.exports = async ({ req, res, log, error }) => {
       errorCode: err.code || 'UNKNOWN',
       duration: `${duration}ms`,
       timestamp: new Date().toISOString(),
-      version: '14.1.0'
+      version: '14.1.1'
     }, statusCode);
   }
 };

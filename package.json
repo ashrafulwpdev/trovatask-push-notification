@@ -13,6 +13,7 @@
     "push-notification",
     "fcm",
     "firebase",
+    "firestore",
     "trovatask",
     "real-time",
     "notifications",
@@ -26,7 +27,8 @@
     "url": "https://github.com/trovatask/push-notification-function"
   },
   "dependencies": {
-    "node-appwrite": "^13.0.0"
+    "node-appwrite": "^13.0.0",
+    "firebase-admin": "^12.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -43,10 +45,18 @@
     }
   },
   "changelog": {
-    "14.1.0": "Multi-device support with Firebase Firestore REST API, fixed userId parameter",
+    "14.1.0": "Multi-device support with Firebase Firestore via Firebase Admin SDK, fixed userId parameter bug, optional deviceId targeting",
     "13.0.0": "Production-ready version with smart user lookup",
     "12.0.0": "Added user mapping support and pagination",
     "11.0.0": "Implemented newest user fallback logic",
     "10.0.0": "Official Appwrite Messaging API integration"
+  },
+  "features": {
+    "multiDevice": true,
+    "firebaseFirestore": true,
+    "firebaseAdmin": true,
+    "deviceTargeting": true,
+    "perDeviceErrorHandling": true,
+    "comprehensiveLogging": true
   }
 }

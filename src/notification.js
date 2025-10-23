@@ -116,7 +116,7 @@ async function sendToDevice(deviceEntry, notificationPayload, messaging, users) 
 // MAIN NOTIFICATION HANDLER
 // ========================================
 
-async function handleNotification(eventData) {
+async function handleNotification(eventData, log = console.log) {
   const { messaging, users, db } = initializeClients();
   
   // Extract event data
@@ -135,6 +135,8 @@ async function handleNotification(eventData) {
     throw new Error('Missing required fields: recipientId or chatId');
   }
   
+  log(`🔍 Fetching user data from Firestore...`);
+  
   // Fetch user data in parallel
   const [userDoc, senderDoc] = await Promise.all([
     db.collection('users').doc(recipientFirebaseUid).get(),
@@ -144,8 +146,10 @@ async function handleNotification(eventData) {
   ]);
   
   if (!userDoc.exists) {
-    throw new Error('Recipient not found');
+    throw new Error('Recipient not found in Firestore');
   }
+  
+  log(`✅ User data fetched`);
   
   const userData = userDoc.data();
   
@@ -169,13 +173,21 @@ async function handleNotification(eventData) {
     throw new Error('No devices found for recipient');
   }
   
+  log(`📱 Found ${Object.keys(devicesMap).length} device(s)`);
+  
   // Get sender name
   const senderName = senderDoc?.data()?.fullName || 
                      senderDoc?.data()?.username || 
                      'Someone';
   
+  log(`👤 Sender: ${senderName}`);
+  
   // Format notification content
   const { title, body } = formatNotification(type, text, senderName);
+  
+  log(`📢 Notification:`);
+  log(`   Title: ${title}`);
+  log(`   Body: ${body}`);
   
   // Prepare notification payload
   const notificationPayload = {
@@ -192,6 +204,8 @@ async function handleNotification(eventData) {
       deepLink: `trovatask://chat/${chatId}`
     }
   };
+  
+  log(`⚡ Starting parallel device sending...`);
   
   // Send to all devices in parallel
   const deviceEntries = Object.entries(devicesMap);
@@ -211,8 +225,13 @@ async function handleNotification(eventData) {
   
   // Handle early response (instant feedback)
   if (raceResult.earlyResponse) {
+    log(`⚡ Early response triggered (${config.EARLY_RESPONSE_THRESHOLD}ms)`);
+    
     // Continue processing in background
-    Promise.allSettled(notificationPromises).catch(() => {});
+    Promise.allSettled(notificationPromises).then(results => {
+      const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+      log(`✅ Background complete: ${successful}/${deviceEntries.length} delivered`);
+    }).catch(() => {});
     
     return {
       success: true,
@@ -227,6 +246,14 @@ async function handleNotification(eventData) {
   );
   
   const successful = results.filter(r => r.success).length;
+  
+  log(`✅ All devices processed: ${successful}/${deviceEntries.length} success`);
+  
+  // Log each device result
+  results.forEach((result, index) => {
+    const status = result.success ? '✅' : '❌';
+    log(`   ${status} Device ${index + 1}: ${result.deviceName || 'Unknown'} - ${result.success ? 'Sent' : result.error}`);
+  });
   
   return {
     success: successful > 0,

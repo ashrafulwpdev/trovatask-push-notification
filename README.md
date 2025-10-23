@@ -1,12 +1,12 @@
 
-# 🔔 TrovaTask Push Notification System v18.0 PRO
+# 🔔 TrovaTask Push Notification System v18.1 PRO
 
 Complete push notification implementation for TrovaTask chat application using **Appwrite Messaging API**, **Firebase Cloud Messaging (FCM)**, and **Firebase Firestore** for device management.
 
 ## 📋 Table of Contents
 
 - [Overview](#overview)
-- [What's New in v18.0](#whats-new-in-v180)
+- [What's New in v18.1](#whats-new-in-v181)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
@@ -29,16 +29,92 @@ Complete push notification implementation for TrovaTask chat application using *
 
 This push notification system automatically sends real-time notifications to users when they receive new messages in TrovaTask chat. The system uses **Appwrite Messaging API** integrated with **Firebase Cloud Messaging** for reliable delivery, and **Firebase Firestore** for device management and multi-device support.
 
-**Version:** 18.0.0 PRO Edition  
+**Version:** 18.1.0 PRO Edition  
 **Last Updated:** October 23, 2025  
 **Status:** ✅ Production Ready  
 **Plan:** Appwrite Pro (700 req/sec)
 
 ---
 
-## 🆕 What's New in v18.0
+## 🆕 What's New in v18.1
 
-### Major Updates
+### ✨ **THE ONE BIG FEATURE: Automatic Invalid Device Cleanup**
+
+v18.0 → v18.1 adds **ONE critical improvement** that fixes a major production issue:
+
+#### 🔴 **Problem in v18.0:**
+- When an Appwrite user is **deleted** or their **session expires**, their device ID becomes **invalid**
+- Your v18.0 cloud function keeps trying to send notifications to these **invalid devices forever**
+- This **wastes** cloud function execution time and shows **failed deliveries** in logs
+- Invalid devices accumulate in Firestore, cluttering your database
+
+#### ✅ **How v18.1 Fixes It:**
+
+```javascript
+// 🆕 NEW in v18.1: Auto-cleanup on 404 errors
+catch (err) {
+  if (err.message.includes('could not be found')) {
+    // Automatically remove invalid device from Firestore
+    await db.collection('users').doc(userId)
+      .update({ [`devices.${deviceId}`]: admin.firestore.FieldValue.delete() });
+    console.log(`🧹 Device ${deviceId} removed automatically`);
+  }
+}
+```
+
+#### 🎯 **Benefits:**
+- ✅ **No more wasted API calls** to deleted Appwrite users
+- ✅ **Clean Firestore data** - invalid devices removed automatically  
+- ✅ **Cleaner logs** - no repeated 404 errors
+- ✅ **Better performance** - fewer retry attempts
+- ✅ **Self-healing** - database stays clean without manual intervention
+
+#### 📊 **Real-World Impact:**
+
+| Scenario | v18.0 Behavior | v18.1 Behavior |
+|----------|----------------|----------------|
+| User deletes account | ❌ Keeps trying to send forever | ✅ Removes device, stops trying |
+| Session expires | ❌ 404 errors logged repeatedly | ✅ Auto-cleanup, one-time log |
+| Invalid device | ❌ Wastes 2 retry attempts | ✅ Removes after first 404 |
+| Firestore data | ❌ Accumulates invalid devices | ✅ Stays clean automatically |
+
+#### 🔄 **How It Works:**
+
+```
+┌─────────────────────────────────────────────────────┐
+│  1. Send notification to device                     │
+│     ↓                                                │
+│  2. Appwrite API returns "User not found" (404)     │
+│     ↓                                                │
+│  3. 🆕 v18.1 detects the 404 error                  │
+│     ↓                                                │
+│  4. 🧹 Automatically removes device from Firestore  │
+│     ↓                                                │
+│  5. ✅ Future notifications skip this device        │
+└─────────────────────────────────────────────────────┘
+```
+
+#### 📝 **Example Log Output:**
+
+```bash
+❌ Device device_001 failed: User 67abc123 could not be found
+🧹 Removing invalid device device_001 from Firestore for user firebase_uid_456
+✅ Device device_001 removed successfully
+```
+
+#### 🚀 **Upgrade from v18.0 to v18.1:**
+
+If you're already using v18.0, upgrading is simple:
+
+1. **Replace** `src/notification.js` with the v18.1 version
+2. **Deploy** to Appwrite (no configuration changes needed)
+3. **Done!** Auto-cleanup will start working immediately
+
+**No breaking changes** - v18.1 is 100% backward compatible with v18.0.
+
+---
+
+## 🎉 What's in v18.0
 - ✨ **Modular Architecture** - Clean separation of concerns (main, config, utils, notification)
 - ⚡ **Ultra-Fast Response** - Sub-300ms early response mechanism
 - 🚀 **Appwrite Pro Optimized** - 700 req/sec rate limiting
@@ -344,8 +420,8 @@ trovatask-push-notification/
 ```json
 {
   "name": "trovatask-push-notification",
-  "version": "18.0.0",
-  "description": "TrovaTask Push Notification System v18.0 PRO",
+  "version": "18.1.0",
+  "description": "TrovaTask Push Notification System v18.1 PRO",
   "main": "src/main.js",
   "dependencies": {
     "node-appwrite": "^13.0.0",
@@ -396,7 +472,7 @@ trovatask-push-notification/
 │   ├── main.js              # Entry point (Appwrite handler)
 │   ├── config.js            # Configuration constants
 │   ├── utils.js             # Utility classes (rate limiter, retry, formatter)
-│   └── notification.js      # Core notification logic
+│   └── notification.js      # Core notification logic with Firebase initialization
 ├── package.json             # Dependencies
 ├── .gitignore              # Git ignore rules
 ├── README.md               # This file
@@ -407,10 +483,10 @@ trovatask-push-notification/
 
 | File | Responsibility |
 |------|----------------|
-| `src/main.js` | Entry point, request handling, validation |
+| `src/main.js` | Entry point, request handling, validation, enhanced logging |
 | `src/config.js` | All configuration constants (rate limits, timeouts) |
 | `src/utils.js` | Rate limiter, concurrency limiter, retry logic, message formatter |
-| `src/notification.js` | Core business logic, Firestore integration, device management |
+| `src/notification.js` | Core business logic, Firebase & Appwrite initialization, device management, auto-cleanup |
 
 ---
 
@@ -620,7 +696,15 @@ Functions → TrovaTaskSendPushNotification → Executions → Latest
 
 ## 📊 Version History
 
-### v18.0.0 PRO (2025-10-23) - Current
+### v18.1.0 PRO (2025-10-23) - Current
+- 🧹 **Auto-Cleanup** - Automatic invalid device removal from Firestore
+- 🎯 **Smart 404 Detection** - Detects deleted Appwrite users
+- ⚡ **Reduced API Waste** - No retry on permanently deleted users
+- 📊 **Enhanced Logging** - Device removal operation logs
+- 🛡️ **Data Integrity** - Clean Firestore records maintained
+- 🐛 **Bug Fixes** - Fixed retry loops, improved error handling
+
+### v18.0.0 PRO (2025-10-23)
 - ✨ **PRO EDITION** - Ultra-fast parallel processing, advanced rate limiting (700 req/sec)
 - ⚡ **Modular Architecture** - Clean separation (main, config, utils, notification)
 - 🚀 **100 Concurrent Requests** - 2x increase from v17.0

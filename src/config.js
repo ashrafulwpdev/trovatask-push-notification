@@ -1,11 +1,12 @@
 /**
- * TrovaTask Push Notification v18.0 PRO
+ * TrovaTask Push Notification v18.1 PRO
  * Configuration
  */
 
 module.exports = {
   // Appwrite Pro Plan Limits
   APPWRITE_RATE_LIMIT: 700,
+  RATE_LIMIT_PER_SECOND: 700,  // Alias for backward compatibility
   MAX_CONCURRENT_REQUESTS: 100,
   
   // Retry Configuration

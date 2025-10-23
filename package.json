@@ -1,7 +1,7 @@
 {
   "name": "trovatask-push-notification",
-  "version": "18.0.0",
-  "description": "TrovaTask Push Notification System v18.0 - PRO Edition with Ultra-Fast Parallel Processing & Advanced Rate Limiting",
+  "version": "18.1.0",
+  "description": "TrovaTask Push Notification System v18.1 - PRO Edition with Auto-Cleanup, Ultra-Fast Parallel Processing & Advanced Rate Limiting",
   "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js",
@@ -63,6 +63,7 @@
     "src/notification.js": "Core notification logic"
   },
   "changelog": {
+    "18.1.0": "AUTO-CLEANUP EDITION - Automatic invalid device cleanup from Firestore, prevents retry on deleted Appwrite users, enhanced device removal logging, smart 404 detection",
     "18.0.0": "PRO EDITION - Ultra-fast parallel processing, advanced rate limiting (700 req/sec), 100 concurrent requests, sub-300ms response time, modular architecture, optimized for Appwrite Pro Plan",
     "17.0.0": "ULTRA-SCALE - Built-in rate limiting, request queuing, exponential backoff, circuit breaker pattern, handles 1000+ concurrent users",
     "16.0.0": "ULTRA-FAST - Parallel device processing, early response mechanism (<500ms), optimistic sending, background completion",
@@ -98,6 +99,15 @@
     "enterpriseGrade": true
   },
   "improvements": {
+    "v18.1": [
+      "Automatic invalid device cleanup from Firestore",
+      "Smart 404 error detection (deleted Appwrite users)",
+      "Prevents unnecessary retry attempts on invalid devices",
+      "Enhanced logging for device removal operations",
+      "Maintains Firestore data integrity automatically",
+      "Reduces wasted API calls to Appwrite",
+      "Better error handling for edge cases"
+    ],
     "v18.0": [
       "Modular architecture (main, config, utils, notification)",
       "Optimized for Appwrite Pro Plan (700 req/sec rate limit)",

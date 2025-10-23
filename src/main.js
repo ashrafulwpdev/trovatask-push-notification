@@ -1,8 +1,13 @@
 /**
  * ========================================
- * TROVATASK v18.0 PRO EDITION - ULTRA-FAST
+ * TROVATASK v18.1 PRO EDITION - AUTO-CLEANUP
  * Main Entry Point (Enhanced Logging)
  * ========================================
+ * 
+ * NEW IN v18.1:
+ * ✅ Automatic invalid device cleanup from Firestore
+ * ✅ Prevents retry attempts on deleted Appwrite users
+ * ✅ Enhanced logging for device removal
  * 
  * OPTIMIZED FOR APPWRITE PRO PLAN:
  * ⚡ 750 req/sec rate limit (Pro)
@@ -21,7 +26,7 @@ module.exports = async ({ req, res, log, error }) => {
   const requestId = Math.random().toString(36).substring(7);
   
   log(`========================================`);
-  log(`🚀 TrovaTask Push Notification v18.0 PRO`);
+  log(`🚀 TrovaTask Push Notification v18.1 PRO`);
   log(`⏰ Request ID: ${requestId}`);
   log(`⏰ Started: ${new Date().toISOString()}`);
   log(`========================================`);
@@ -50,7 +55,7 @@ module.exports = async ({ req, res, log, error }) => {
     log(`📤 Sending notifications...`);
     
     // Handle notification
-    const result = await handleNotification(eventData, log);
+    const result = await handleNotification(eventData);
     
     const duration = Date.now() - startTime;
     
